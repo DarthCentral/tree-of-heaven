@@ -1,14 +1,16 @@
 # Worldroot (Forge 1.20.1)
 
-This is the Worldroot source project. Build with Java 17 and Gradle using `gradle build`.
+Build with Java 17 and Gradle using `gradle build`.
 
-## Growth update
-- The heart schedules a growth pulse every 1–2 ticks (water nearby accelerates it).
-- The trunk grows upward one block per pulse.
-- The crown now adds multiple branches at different trunk heights, secondary forks, and dense persistent oak-leaf clusters.
-- Roots extend down through common soft terrain and branch horizontally from deeper root sections. They do not replace stone, bedrock, fluids, or player-placed blocks.
+## Colossal continuous growth
+- The trunk grows until it reaches the world's maximum build height; the old 2,048-block scan cap is removed.
+- Crown branches scale with trunk height, and the trunk's periodic outer rings can become much wider.
+- The taproot advances downward until it encounters the bedrock floor. Bedrock is never replaced.
+- Radial roots extend one new block per growth pulse from every established taproot tier. Their frontier is based on world age, not tree height, so they keep expanding after the canopy reaches the sky limit.
+- Roots tunnel through supported natural terrain and stone types, but not bedrock, fluids, ores, containers, or arbitrary player builds.
+- Root placement is limited to already-loaded chunks to avoid forcing huge areas of the world to load. Unloaded areas can be reached as they become loaded and growth continues.
 
-## Important limitations
-- This is a custom Forge tree implementation, not a registered Dynamic Trees species. Dynamic Trees is declared as a required runtime companion in `mods.toml`, but its growth API is not yet integrated.
-- Growth is not truly infinite: Minecraft build height, loaded chunks, available space, and server performance still apply.
-- This update is source-only and has not been compiled in this environment. Run the GitHub Actions build and check for errors before installing.
+## Important notes
+- This is a custom Forge tree implementation, not a registered Dynamic Trees species.
+- Minecraft's build-height floor/ceiling, loaded chunks, replaceable terrain, and server performance remain physical limits. The tree cannot grow above the sky limit or through bedrock.
+- Source update has not been compiled in this environment. Run `gradle build` (or the project's CI build) before installing.

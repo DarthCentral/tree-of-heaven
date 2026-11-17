@@ -1,1 +1,6 @@
-{"parent":"minecraft:item/generated","textures":{"layer0":"minecraft:item/oak_sapling"}}
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "worldroot:item/worldroot_fragment"
+  }
+}

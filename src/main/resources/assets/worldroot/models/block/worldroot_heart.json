@@ -1,1 +1,6 @@
-{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/oak_log"}}
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "worldroot:block/worldroot_heart"
+  }
+}

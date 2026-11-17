@@ -1,11 +1,14 @@
-# Worldroot (Minecraft 1.20.1 Forge)
+# Worldroot (Forge 1.20.1)
 
-This is a Forge source project, not a precompiled installable mod JAR.
+This is the Worldroot source project. Build with Java 17 and Gradle using `gradle build`.
 
-The creative tab registration is named **Worldroot** and should appear as its own tab in the Creative inventory after the project is successfully compiled and installed. It contains the Worldroot Heart, Fragment, Wood, and Root items.
+## Growth update
+- The heart schedules a growth pulse every 1–2 ticks (water nearby accelerates it).
+- The trunk grows upward one block per pulse.
+- The crown now adds multiple branches at different trunk heights, secondary forks, and dense persistent oak-leaf clusters.
+- Roots extend down through common soft terrain and branch horizontally from deeper root sections. They do not replace stone, bedrock, fluids, or player-placed blocks.
 
-## Build
-Use Java 17 and the Gradle wrapper (or a compatible Gradle installation) with internet access to resolve ForgeGradle and Minecraft dependencies. From this folder run `gradlew build` (Windows: `gradlew.bat build`). The compiled mod is written to `build/libs/`.
-
-## Current prototype limitations
-The growth implementation is experimental and does not yet implement the complete requested infinite tree behaviour or a full Dynamic Trees species integration. World height, chunk loading, and server performance also constrain growth.
+## Important limitations
+- This is a custom Forge tree implementation, not a registered Dynamic Trees species. Dynamic Trees is declared as a required runtime companion in `mods.toml`, but its growth API is not yet integrated.
+- Growth is not truly infinite: Minecraft build height, loaded chunks, available space, and server performance still apply.
+- This update is source-only and has not been compiled in this environment. Run the GitHub Actions build and check for errors before installing.

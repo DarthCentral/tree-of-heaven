@@ -14,23 +14,22 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.loot.LootParams;
 import java.util.List;
 
-/** Repeating growth controller for a Worldroot. */
+/** Organic, deliberately slow growth controller for a Worldroot. */
 public class WorldrootHeartBlock extends Block {
     private static final int MAX_TRUNK_SCAN = 2048;
     public WorldrootHeartBlock(BlockBehaviour.Properties properties) { super(properties); }
 
     @Override public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean moving) {
-        if (!level.isClientSide) level.scheduleTick(pos, this, 20);
+        if (!level.isClientSide) level.scheduleTick(pos, this, 40);
     }
 
     @Override public void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
         int height = findTrunkHeight(level, pos);
         growTrunk(level, pos);
-        growCrown(level, pos, height, random);
+        growCrown(level, pos, height);
         thickenTrunk(level, pos, height);
-        growRoots(level, pos, height, random);
-        // Keep the controller alive. Water makes the next pulse quicker.
-        level.scheduleTick(pos, this, hasWater(level, pos, 10) ? 2 : 5);
+        growRoots(level, pos, height);
+        level.scheduleTick(pos, this, 40);
     }
 
     private int findTrunkHeight(ServerLevel level, BlockPos heart) {
@@ -49,54 +48,81 @@ public class WorldrootHeartBlock extends Block {
         int scanned = 0;
         while (scanned++ < MAX_TRUNK_SCAN && top.getY() < level.getMaxBuildHeight() - 1
                 && level.getBlockState(top).is(WorldrootMod.WOOD.get())) top = top.above();
-        if (top.getY() < level.getMaxBuildHeight() - 1 && (level.isEmptyBlock(top) || level.getBlockState(top).is(Blocks.OAK_LEAVES))) {
+        if (top.getY() < level.getMaxBuildHeight() - 1
+                && (level.isEmptyBlock(top) || level.getBlockState(top).is(Blocks.OAK_LEAVES)))
             level.setBlock(top, WorldrootMod.WOOD.get().defaultBlockState(), 3);
-        }
     }
 
-    /** Four guaranteed radial branch tiers; branch length increases as the trunk grows. */
-    private void growCrown(ServerLevel level, BlockPos heart, int height, RandomSource random) {
-        if (height < 3) return;
-        int tierCount = Math.max(1, height / 6);
-        int maxTiersThisPulse = Math.min(tierCount, 24);
-        int firstTier = Math.max(0, tierCount - maxTiersThisPulse);
-        Direction[] dirs = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
-        for (int tier = firstTier; tier < tierCount; tier++) {
-            int y = 3 + tier * 6;
-            if (y > height) continue;
-            BlockPos trunkAt = heart.above(y);
-            if (!level.getBlockState(trunkAt).is(WorldrootMod.WOOD.get())) continue;
-            int length = 5 + Math.min(48, height / 5) + tier / 3;
-            for (Direction dir : dirs) {
-                BlockPos tip = trunkAt;
-                for (int step = 1; step <= length; step++) {
-                    BlockPos branch = trunkAt.relative(dir, step).above(step / 7);
-                    if (!canPlaceWood(level, branch)) break;
-                    level.setBlock(branch, WorldrootMod.WOOD.get().defaultBlockState(), 3);
-                    tip = branch;
-                    // Forks on both sides at regular intervals, not just one random fork.
-                    if (step >= 4 && step % 5 == 0) {
-                        growFork(level, branch, dir.getClockWise(), 3 + tier / 5, random);
-                        growFork(level, branch, dir.getCounterClockWise(), 3 + tier / 5, random);
-                    }
+    private void growCrown(ServerLevel level, BlockPos heart, int height) {
+        if (height < 5) return;
+        int tier = 0, branchY = 4;
+        while (branchY < height - 1 && tier < 100) {
+            RandomSource shape = RandomSource.create(shapeSeed(heart, 1000 + tier));
+            BlockPos start = heart.above(branchY);
+            if (level.getBlockState(start).is(WorldrootMod.WOOD.get())) {
+                int limbs = shape.nextInt(4) == 0 ? 2 : 1;
+                for (int limb = 0; limb < limbs; limb++) {
+                    double angle = shape.nextDouble() * Math.PI * 2.0;
+                    int targetLength = Math.min(15, 2 + (height - branchY) / 5);
+                    targetLength = Math.min(targetLength, 5 + shape.nextInt(7));
+                    growCurvedBranch(level, start, angle, targetLength,
+                            shapeSeed(heart, 2000 + tier * 7L + limb));
                 }
-                placeLeafCluster(level, tip, random, 3 + Math.min(3, height / 80));
             }
+            branchY += 9 + shape.nextInt(7);
+            tier++;
         }
-        // Also leaf the upper crown, so new growth does not remain bare.
         BlockPos crown = heart.above(Math.max(1, height));
-        if (level.getBlockState(crown).is(WorldrootMod.WOOD.get())) placeLeafCluster(level, crown, random, 4);
+        if (level.getBlockState(crown).is(WorldrootMod.WOOD.get()) && height > 7) {
+            RandomSource leaves = RandomSource.create(shapeSeed(heart, height / 4));
+            placeLeafCluster(level, crown, leaves, 2 + leaves.nextInt(2));
+        }
     }
 
-    private void growFork(ServerLevel level, BlockPos start, Direction dir, int length, RandomSource random) {
+    private void growCurvedBranch(ServerLevel level, BlockPos start, double angle, int length, long seed) {
+        RandomSource shape = RandomSource.create(seed);
+        double x = start.getX(), z = start.getZ();
+        int y = start.getY();
         BlockPos tip = start;
-        for (int i = 1; i <= Math.min(12, length); i++) {
-            BlockPos next = start.relative(dir, i).above(i / 3);
+        int lastX = start.getX(), lastZ = start.getZ(), lastY = start.getY();
+        boolean forked = false;
+        for (int step = 1; step <= length; step++) {
+            if (step > 1 && step % (2 + shape.nextInt(3)) == 0)
+                angle += (shape.nextDouble() - 0.5) * 0.9;
+            x += Math.cos(angle);
+            z += Math.sin(angle);
+            if (step % (4 + shape.nextInt(3)) == 0 && shape.nextFloat() < 0.72f) y++;
+            int bx = (int)Math.round(x), bz = (int)Math.round(z);
+            if (bx == lastX && bz == lastZ && y == lastY) continue;
+            BlockPos next = new BlockPos(bx, y, bz);
             if (!canPlaceWood(level, next)) break;
             level.setBlock(next, WorldrootMod.WOOD.get().defaultBlockState(), 3);
             tip = next;
+            lastX = bx; lastZ = bz; lastY = y;
+            if (!forked && step >= 4 && step >= length / 2 && shape.nextFloat() < 0.16f) {
+                forked = true;
+                double forkAngle = angle + (shape.nextBoolean() ? 1 : -1) * (0.65 + shape.nextDouble() * 0.55);
+                growTwig(level, next, forkAngle, 2 + shape.nextInt(4), seed ^ 0x5DEECE66DL);
+            }
         }
-        placeLeafCluster(level, tip, random, 2 + random.nextInt(2));
+        if (!tip.equals(start)) {
+            RandomSource leaves = RandomSource.create(seed ^ 0x9E3779B97F4A7C15L);
+            placeLeafCluster(level, tip, leaves, 2 + leaves.nextInt(2));
+        }
+    }
+
+    private void growTwig(ServerLevel level, BlockPos start, double angle, int length, long seed) {
+        RandomSource shape = RandomSource.create(seed);
+        double x = start.getX(), z = start.getZ();
+        int y = start.getY();
+        for (int i = 1; i <= length; i++) {
+            angle += (shape.nextDouble() - 0.5) * 0.35;
+            x += Math.cos(angle); z += Math.sin(angle);
+            if (i % 3 == 0 && shape.nextBoolean()) y++;
+            BlockPos next = new BlockPos((int)Math.round(x), y, (int)Math.round(z));
+            if (!canPlaceWood(level, next)) break;
+            level.setBlock(next, WorldrootMod.WOOD.get().defaultBlockState(), 3);
+        }
     }
 
     private boolean canPlaceWood(ServerLevel level, BlockPos pos) {
@@ -106,14 +132,15 @@ public class WorldrootHeartBlock extends Block {
     }
 
     private void thickenTrunk(ServerLevel level, BlockPos heart, int height) {
-        // Add one new outer ring over time. Radius grows with tree height; capped
-        // per-ring for performance, while higher rings continue to widen as height rises.
-        int radius = 1 + height / 35;
-        int ringY = 2 + ((height / 12) * 12);
-        if (ringY > height) ringY = Math.max(2, height - 1);
-        int r = Math.min(12, radius);
-        for (int dx = -r; dx <= r; dx++) for (int dz = -r; dz <= r; dz++) {
-            if (dx * dx + dz * dz > r * r) continue;
+        if (height < 12 || height % 16 != 0) return;
+        int radius = Math.min(6, 1 + height / 70);
+        int ringY = Math.max(2, height - 1);
+        for (int dx = -radius; dx <= radius; dx++) for (int dz = -radius; dz <= radius; dz++) {
+            double distance = Math.sqrt(dx * dx + dz * dz);
+            long noise = mix64(shapeSeed(heart, dx * 31L + dz * 97L + height / 16));
+            double unevenEdge = radius + (((noise >>> 11) & 1023) / 1023.0 - 0.5) * 1.2;
+            if (distance > unevenEdge) continue;
+            if (distance > radius - 0.4 && (noise & 3L) == 0) continue;
             BlockPos p = heart.offset(dx, ringY, dz);
             if (level.isEmptyBlock(p) || level.getBlockState(p).is(Blocks.OAK_LEAVES))
                 level.setBlock(p, WorldrootMod.WOOD.get().defaultBlockState(), 3);
@@ -122,15 +149,14 @@ public class WorldrootHeartBlock extends Block {
 
     private void placeLeafCluster(ServerLevel level, BlockPos center, RandomSource random, int radius) {
         for (int dx = -radius; dx <= radius; dx++) for (int dy = -radius; dy <= radius; dy++) for (int dz = -radius; dz <= radius; dz++) {
-            if (dx * dx + dy * dy + dz * dz > radius * radius + 2 || random.nextFloat() < 0.07f) continue;
+            if (dx * dx + dy * dy + dz * dz > radius * radius + 2 || random.nextFloat() < 0.16f) continue;
             BlockPos leaf = center.offset(dx, dy, dz);
             if (level.isEmptyBlock(leaf)) level.setBlock(leaf,
                     Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true), 3);
         }
     }
 
-    /** Taproot advances downward; horizontal roots are extended from many depths every pulse. */
-    private void growRoots(ServerLevel level, BlockPos heart, int height, RandomSource random) {
+    private void growRoots(ServerLevel level, BlockPos heart, int height) {
         BlockPos cursor = heart.below();
         int depth = 0;
         while (depth < 1024 && cursor.getY() > level.getMinBuildHeight()
@@ -140,28 +166,39 @@ public class WorldrootHeartBlock extends Block {
         if (cursor.getY() > level.getMinBuildHeight() && canRootReplace(level, cursor))
             level.setBlock(cursor, WorldrootMod.ROOT.get().defaultBlockState(), 3);
 
-        Direction[] dirs = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
-        int rootTiers = Math.max(1, Math.min(32, (height + 5) / 6));
-        for (int tier = 0; tier < rootTiers; tier++) {
-            int y = heart.getY() - 2 - tier * 6;
-            if (y <= level.getMinBuildHeight()) break;
-            BlockPos anchor = new BlockPos(heart.getX(), y, heart.getZ());
-            // Find a root near this depth, allowing side roots to branch from the taproot.
-            if (!level.getBlockState(anchor).is(WorldrootMod.ROOT.get())) continue;
-            int length = 4 + Math.min(64, height / 4) + tier / 2;
-            for (Direction dir : dirs) {
-                BlockPos tip = anchor;
-                for (int step = 1; step <= length; step++) {
-                    BlockPos next = anchor.relative(dir, step).below(step / 12);
-                    if (!canRootReplace(level, next) && !level.getBlockState(next).is(WorldrootMod.ROOT.get())) break;
-                    level.setBlock(next, WorldrootMod.ROOT.get().defaultBlockState(), 3);
-                    tip = next;
-                    if (step % 8 == 0) {
-                        Direction side = random.nextBoolean() ? dir.getClockWise() : dir.getCounterClockWise();
-                        BlockPos spur = tip.relative(side);
-                        if (canRootReplace(level, spur)) level.setBlock(spur, WorldrootMod.ROOT.get().defaultBlockState(), 3);
-                    }
+        int tier = 0, depthFromHeart = 3;
+        while (depthFromHeart < depth && tier < 60) {
+            RandomSource shape = RandomSource.create(shapeSeed(heart, 5000 + tier));
+            BlockPos anchor = heart.below(depthFromHeart);
+            if (level.getBlockState(anchor).is(WorldrootMod.ROOT.get())) {
+                int rootsHere = shape.nextInt(3) == 0 ? 2 : 1;
+                for (int r = 0; r < rootsHere; r++) {
+                    double angle = shape.nextDouble() * Math.PI * 2.0;
+                    int length = Math.min(22, 3 + height / 9 + shape.nextInt(5));
+                    growCurvedRoot(level, anchor, angle, length, shapeSeed(heart, 6000 + tier * 5L + r));
                 }
+            }
+            depthFromHeart += 7 + shape.nextInt(8);
+            tier++;
+        }
+    }
+
+    private void growCurvedRoot(ServerLevel level, BlockPos start, double angle, int length, long seed) {
+        RandomSource shape = RandomSource.create(seed);
+        double x = start.getX(), z = start.getZ();
+        int y = start.getY();
+        for (int step = 1; step <= length; step++) {
+            if (step > 1 && step % (2 + shape.nextInt(3)) == 0)
+                angle += (shape.nextDouble() - 0.5) * 1.15;
+            x += Math.cos(angle); z += Math.sin(angle);
+            if (step % (3 + shape.nextInt(3)) == 0) y--;
+            BlockPos next = new BlockPos((int)Math.round(x), y, (int)Math.round(z));
+            if (!canRootReplace(level, next) && !level.getBlockState(next).is(WorldrootMod.ROOT.get())) break;
+            level.setBlock(next, WorldrootMod.ROOT.get().defaultBlockState(), 3);
+            if (step % 7 == 0) {
+                BlockPos spur = next.below();
+                if (canRootReplace(level, spur))
+                    level.setBlock(spur, WorldrootMod.ROOT.get().defaultBlockState(), 3);
             }
         }
     }
@@ -170,8 +207,6 @@ public class WorldrootHeartBlock extends Block {
         if (pos.getY() <= level.getMinBuildHeight()) return false;
         BlockState s = level.getBlockState(pos);
         if (s.is(WorldrootMod.ROOT.get()) || s.isAir()) return true;
-        // Roots may tunnel through natural terrain and stone, but not bedrock,
-        // fluids, ores, containers, or player-placed utility blocks.
         return s.is(Blocks.DIRT) || s.is(Blocks.GRASS_BLOCK) || s.is(Blocks.COARSE_DIRT)
                 || s.is(Blocks.ROOTED_DIRT) || s.is(Blocks.PODZOL) || s.is(Blocks.MYCELIUM)
                 || s.is(Blocks.SAND) || s.is(Blocks.RED_SAND) || s.is(Blocks.GRAVEL)
@@ -180,13 +215,14 @@ public class WorldrootHeartBlock extends Block {
                 || s.is(Blocks.DIORITE) || s.is(Blocks.GRANITE) || s.is(Blocks.TUFF);
     }
 
-    private boolean hasWater(Level level, BlockPos pos, int radius) {
-        BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
-        for (int x = -radius; x <= radius; x++) for (int y = -radius; y <= radius; y++) for (int z = -radius; z <= radius; z++) {
-            p.set(pos.getX() + x, pos.getY() + y, pos.getZ() + z);
-            if (level.getFluidState(p).isSource()) return true;
-        }
-        return false;
+    private long shapeSeed(BlockPos pos, long salt) {
+        return mix64(pos.asLong() ^ salt * 0x9E3779B97F4A7C15L);
+    }
+
+    private long mix64(long z) {
+        z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
+        z = (z ^ (z >>> 27)) * 0x94D049BB133111EBL;
+        return z ^ (z >>> 31);
     }
 
     @Override public List<ItemStack> getDrops(BlockState state, LootParams.Builder builder) {
